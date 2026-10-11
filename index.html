@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>数式グラフビューア</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+<style>
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: one-column instrument — formula bar, two-row key strip, then a graph-paper stage that takes the rest of the screen */
+:root{
+  --bg:#EDF1F0; --surface:#FFFFFF; --ink:#13232A; --muted:#58696F; --line:#D2DBDC;
+  --accent:#0B6A87; --accent-ink:#FFFFFF; --key:#F6F9F9; --key-var:#E1EFF3;
+  --curve:#CF4520; --grid:#E9EEEE; --grid-major:#CDD9DB; --axis:#5E737A; --danger:#B42318;
+  --shadow:rgba(19,35,42,.10);
+  --font-ui:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+  --font-math:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1417; --surface:#131D21; --ink:#E3EBED; --muted:#8FA1A7; --line:#27363B;
+    --accent:#52B6D4; --accent-ink:#06141A; --key:#17242A; --key-var:#14323C;
+    --curve:#FF7D52; --grid:#18242A; --grid-major:#253A41; --axis:#86A0A8; --danger:#F97066;
+    --shadow:rgba(0,0,0,.4); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1417; --surface:#131D21; --ink:#E3EBED; --muted:#8FA1A7; --line:#27363B;
+  --accent:#52B6D4; --accent-ink:#06141A; --key:#17242A; --key-var:#14323C;
+  --curve:#FF7D52; --grid:#18242A; --grid-major:#253A41; --axis:#86A0A8; --danger:#F97066;
+  --shadow:rgba(0,0,0,.4); color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.app{min-height:100%;display:flex;flex-direction:column;gap:12px;max-width:1120px;margin:0 auto;padding-block:14px 16px;padding-inline:16px}
+
+.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px}
+.top h1{margin:0;font-size:1.12rem;font-weight:700;letter-spacing:.03em;text-wrap:balance}
+.top p{margin:0;color:var(--muted);font-size:.8rem;line-height:1.5}
+.top code{font-family:var(--font-math);font-size:.78rem;color:var(--ink)}
+
+.entry{display:flex;gap:8px}
+.entry input{flex:1;min-width:0;height:50px;padding:0 14px;border:1.5px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:500 1.06rem/1 var(--font-math);letter-spacing:.01em}
+.entry input::placeholder{color:var(--muted);opacity:.7}
+.entry input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.show{height:50px;padding:0 24px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:700 1rem var(--font-ui);letter-spacing:.12em;cursor:pointer;touch-action:manipulation;flex:none}
+.show:hover{filter:brightness(1.07)}
+.show:active{transform:translateY(1px)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.keys{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,42px);grid-auto-columns:auto;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+.key{min-width:48px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--key);color:var(--ink);font:500 .95rem var(--font-math);cursor:pointer;white-space:nowrap;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.key:hover{border-color:var(--accent)}
+.key:active{background:color-mix(in srgb,var(--accent) 20%,var(--key))}
+.key.var{background:var(--key-var);color:var(--accent);font-weight:700}
+.key.fn{background:var(--surface)}
+.key.lhs{color:var(--accent);border-style:dashed}
+.key.cmd{color:var(--danger)}
+
+.examples{display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none}
+.examples span{font-size:.72rem;letter-spacing:.1em;color:var(--muted);flex:none;padding-right:2px}
+.ex{flex:none;padding:6px 11px;border:1px dashed var(--line);border-radius:999px;background:transparent;color:var(--muted);font:400 .8rem var(--font-math);cursor:pointer;white-space:nowrap;touch-action:manipulation}
+.ex:hover{color:var(--accent);border-color:var(--accent)}
+
+.stage{position:relative;flex:1 1 auto;min-height:340px;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+#plot2d{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#plot2d:active{cursor:grabbing}
+#plot3d{position:absolute;inset:0}
+.badge{position:absolute;top:10px;left:10px;display:flex;gap:8px;align-items:baseline;padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:color-mix(in srgb,var(--surface) 90%,transparent);font:500 .75rem var(--font-math);pointer-events:none}
+.badge b{color:var(--accent);font-weight:700;letter-spacing:.04em}
+.range3d{position:absolute;top:10px;right:10px;display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.range3d button{height:34px;padding:0 10px;border:0;background:transparent;color:var(--muted);font:500 .78rem var(--font-math);cursor:pointer;touch-action:manipulation}
+.range3d button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.zoom{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px}
+.zoom button{width:44px;height:44px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:500 1.3rem/1 var(--font-math);cursor:pointer;box-shadow:0 1px 3px var(--shadow);touch-action:manipulation}
+.zoom button:hover{border-color:var(--accent);color:var(--accent)}
+.zoom #zoomReset{font-size:.72rem;font-family:var(--font-ui);font-weight:700}
+.hint{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 76px);margin:0;padding:4px 8px;border-radius:6px;background:color-mix(in srgb,var(--surface) 85%,transparent);color:var(--muted);font-size:.72rem;line-height:1.5;pointer-events:none}
+
+dialog{width:min(480px,calc(100vw - 32px));padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:0 24px 60px var(--shadow)}
+dialog::backdrop{background:rgba(8,18,22,.5)}
+.dlg-eyebrow{margin:0 0 4px;color:var(--danger);font-size:.72rem;font-weight:700;letter-spacing:.14em}
+dialog h2{margin:0 0 10px;font-size:1.1rem;text-wrap:balance}
+dialog p{margin:0 0 10px;line-height:1.65;font-size:.92rem}
+.expr-box{margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg);overflow-x:auto;font:500 .95rem/1.4 var(--font-math);white-space:pre}
+.expr-box .mark{color:var(--danger);font-weight:700}
+.hint-line{color:var(--accent)}
+.detail{color:var(--muted);font-size:.75rem!important;font-family:var(--font-math)}
+.dlg-actions{display:flex;justify-content:flex-end;margin-top:6px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+@media (max-width:520px){
+  .show{padding:0 16px}
+  .top p{font-size:.74rem}
+}
+</style>
+
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>数式グラフビューア</h1>
+    <p><code>y = f(x)</code> は平面、<code>z = f(x, y)</code> は立体、<code>r = f(θ)</code> は極座標で描きます</p>
+  </header>
+
+  <form id="exprForm" class="entry" autocomplete="off">
+    <label for="expr" class="sr">数式</label>
+    <input id="expr" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="例: y = x*sin(x)">
+    <button type="submit" class="show" id="showBtn">表示</button>
+  </form>
+
+  <div class="keys" id="keys" role="group" aria-label="入力ボタン"></div>
+
+  <div class="examples" id="examples">
+    <span>例</span>
+  </div>
+
+  <section class="stage" id="stage" aria-label="グラフ">
+    <canvas id="plot2d" aria-label="2次元グラフ"></canvas>
+    <div id="plot3d" hidden></div>
+    <div class="badge" id="badge"><b>2D</b><span>y = f(x)</span></div>
+    <div class="range3d" id="range3d" hidden role="group" aria-label="x, y の範囲">
+      <button type="button" data-r="2" aria-pressed="false">±2</button>
+      <button type="button" data-r="5" aria-pressed="true">±5</button>
+      <button type="button" data-r="10" aria-pressed="false">±10</button>
+    </div>
+    <div class="zoom">
+      <button type="button" id="zoomIn" aria-label="拡大">+</button>
+      <button type="button" id="zoomOut" aria-label="縮小">−</button>
+      <button type="button" id="zoomReset" aria-label="表示を元に戻す">戻す</button>
+    </div>
+    <p class="hint" id="hint"></p>
+  </section>
+</div>
+
+<dialog id="errDlg" aria-labelledby="errTitle">
+  <form method="dialog">
+    <p class="dlg-eyebrow">入力エラー</p>
+    <h2 id="errTitle">数式に誤りがあります</h2>
+    <p id="errMsg"></p>
+    <div class="expr-box" id="errExpr"></div>
+    <p class="hint-line" id="errHint"></p>
+    <p class="detail" id="errDetail"></p>
+    <div class="dlg-actions"><button class="show" value="close" id="errClose">閉じて修正する</button></div>
+  </form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/mathjs@13.2.0/lib/browser/math.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const input = $('expr'), form = $('exprForm'), keysEl = $('keys'), stage = $('stage');
+const canvas = $('plot2d'), div3 = $('plot3d'), badge = $('badge'), hintEl = $('hint'), range3d = $('range3d');
+const fine = matchMedia('(pointer: fine)').matches;
+
+function tok(){
+  const cs = getComputedStyle(document.documentElement);
+  const g = n => cs.getPropertyValue(n).trim();
+  return {bg:g('--bg'), surface:g('--surface'), ink:g('--ink'), muted:g('--muted'), line:g('--line'),
+    accent:g('--accent'), curve:g('--curve'), grid:g('--grid'), gridMajor:g('--grid-major'), axis:g('--axis')};
+}
+
+/* ---------- math setup ---------- */
+let M = null;
+if (window.math) {
+  M = math.create(math.all);
+  M.import({ ln: function (v) { return M.log(v); } }, { silent: true });
+}
+
+class FormulaError extends Error {
+  constructor(msg, o = {}) { super(msg); this.expr = o.expr || ''; this.pos = (o.pos ?? null); this.hint = o.hint || ''; this.detail = o.detail || ''; }
+}
+
+function normalize(s){
+  return s.replace(/²/g, '^2').replace(/³/g, '^3')
+    .normalize('NFKC')
+    .replace(/√\s*([A-Za-z0-9_.θπ]+)/g, 'sqrt($1)')
+    .replace(/√/g, 'sqrt')
+    .replace(/[θΘ]/g, 'theta').replace(/π/g, 'pi')
+    .replace(/[×·∙]/g, '*').replace(/÷/g, '/').replace(/[−–]/g, '-')
+    .trim();
+}
+
+function toNum(v){
+  if (typeof v === 'number') return v;
+  if (v && v.isComplex) return Math.abs(v.im) < 1e-10 ? v.re : NaN;
+  if (v && (v.isBigNumber || v.isFraction)) return Number(v);
+  return NaN;
+}
+
+function parseError(e, rhs){
+  const m = String(e.message || e); let msg = '数式の書き方に誤りがあります。', r;
+  if (/Unexpected end of expression/.test(m)) msg = '式が途中で終わっています。演算子や関数の後ろに値を入力してください。';
+  else if ((r = m.match(/Parenthesis (\S) expected/))) msg = `閉じ括弧「${r[1]}」が足りません。`;
+  else if ((r = m.match(/Unexpected operator (\S+)/))) msg = `演算子「${r[1]}」の位置が正しくありません。`;
+  else if (/Value expected/.test(m)) msg = '数・変数・括弧が必要な位置に何もありません。';
+  else if ((r = m.match(/Syntax error in part "(.*?)"/))) msg = `「${r[1]}」の部分を解釈できません。`;
+  else if ((r = m.match(/Unexpected "(.*?)"/))) msg = `「${r[1]}」はこの位置では使えません。`;
+  else if (/Unexpected character/.test(m)) msg = '使えない文字が含まれています。';
+  let pos = typeof e.char === 'number' ? e.char - 1 : null;
+  return new FormulaError(msg, {expr: rhs, pos, detail: m.replace(/\s*\(char \d+\)/, '')});
+}
+
+function evalError(e, rhs){
+  const m = String(e.message || e); let msg = '式を計算できませんでした。', r;
+  if ((r = m.match(/Too few arguments in function (\w+)/))) msg = `関数 ${r[1]} の引数が足りません。`;
+  else if ((r = m.match(/Too many arguments in function (\w+)/))) msg = `関数 ${r[1]} の引数が多すぎます。`;
+  else if ((r = m.match(/Unexpected type of argument in function (\w+)/))) msg = `関数 ${r[1]} に渡した値の種類が正しくありません。`;
+  else if ((r = m.match(/Undefined (?:symbol|function) (\w+)/))) msg = `「${r[1]}」は定義されていません。`;
+  return new FormulaError(msg, {expr: rhs, detail: m});
+}
+
+const CONSTS = new Set(['pi', 'e', 'tau', 'phi', 'PI', 'E']);
+const FN_PREFIX = /^(asin|acos|atan|sinh|cosh|tanh|sin|cos|tan|sqrt|abs|exp|ln|log)/;
+
+function analyze(raw){
+  const src = normalize(raw);
+  if (!src) throw new FormulaError('数式を入力してください。', {hint: '例: y = x*sin(x)、z = x^2 - y^2'});
+  const parts = src.split('=');
+  if (parts.length > 2) throw new FormulaError('「=」は1つだけ使えます。', {expr: src});
+  let lhs = null, rhs = src;
+  if (parts.length === 2){
+    const L = parts[0].replace(/\s+/g, '');
+    rhs = parts[1].trim();
+    if (L === 'y' || L === 'f(x)') lhs = 'y';
+    else if (L === 'z' || L === 'f(x,y)') lhs = 'z';
+    else if (L === 'r' || L === 'r(theta)' || L === 'f(theta)') lhs = 'r';
+    else throw new FormulaError(`左辺「${parts[0].trim() || '(空)'}」は使えません。`, {expr: src, hint: 'y = …(平面)、z = …(立体)、r = …(極座標)のいずれかで書いてください。'});
+    if (!rhs) throw new FormulaError('「=」の右側に式がありません。', {expr: src, pos: src.length});
+  }
+  let node;
+  try { node = M.parse(rhs); } catch (e) { throw parseError(e, rhs); }
+
+  const vars = new Set(); const unknownFn = []; let assign = false;
+  node.traverse((n, path, parent) => {
+    if (n.isAssignmentNode || n.isFunctionAssignmentNode) assign = true;
+    if (n.isSymbolNode){
+      if (parent && parent.isFunctionNode && path === 'fn'){
+        if (typeof M[n.name] !== 'function') unknownFn.push(n.name);
+      } else vars.add(n.name);
+    }
+  });
+  if (assign) throw new FormulaError('式の中で代入は使えません。', {expr: rhs});
+  for (const name of unknownFn){
+    if (['x', 'y', 'theta'].includes(name))
+      throw new FormulaError(`「${name === 'theta' ? 'θ' : name}(…)」は関数呼び出しとして解釈されます。`, {expr: rhs, hint: `掛け算のときは ${name === 'theta' ? 'θ' : name}*(…) のように * を入れてください。`});
+    throw new FormulaError(`「${name}」という関数はありません。`, {expr: rhs, hint: 'sin, cos, tan, sqrt, abs, exp, ln, log10 などが使えます。'});
+  }
+  for (const v of vars){
+    if (v === 'x' || v === 'y' || v === 'theta' || CONSTS.has(v)) continue;
+    let hint = '使える変数は x, y, θ と定数 π, e です。';
+    if (/^[xy]+$/.test(v)) hint = `掛け算は ${v.split('').join('*')} のように * を入れてください。`;
+    else if (FN_PREFIX.test(v)) hint = '関数の引数は括弧で囲んでください(例: sin(x))。';
+    throw new FormulaError(`「${v}」は使えない変数です。`, {expr: rhs, pos: rhs.indexOf(v), hint});
+  }
+  const hasX = vars.has('x'), hasY = vars.has('y'), hasT = vars.has('theta');
+  let mode;
+  if (lhs === 'y'){
+    if (hasY) throw new FormulaError('y = … の右辺に y は使えません。', {expr: rhs, hint: '立体グラフは z = f(x, y) と書いてください。'});
+    if (hasT) throw new FormulaError('y = … の右辺に θ は使えません。', {expr: rhs, hint: '極座標は r = f(θ) と書いてください。'});
+    mode = 'fn';
+  } else if (lhs === 'z'){
+    if (hasT) throw new FormulaError('z = … の右辺に θ は使えません。', {expr: rhs, hint: '立体グラフでは x と y を使ってください。'});
+    mode = 'surface';
+  } else if (lhs === 'r'){
+    if (hasX || hasY) throw new FormulaError('r = … の右辺では θ だけを使えます。', {expr: rhs});
+    mode = 'polar';
+  } else {
+    if (hasT && (hasX || hasY)) throw new FormulaError('θ と x, y は同じ式で使えません。', {expr: rhs});
+    mode = hasT ? 'polar' : hasY ? 'surface' : 'fn';
+  }
+
+  const code = node.compile();
+  let probe;
+  try { probe = code.evaluate({x: 0.7, y: 0.3, theta: 0.7}); } catch (e) { throw evalError(e, rhs); }
+  if (!(typeof probe === 'number' || (probe && (probe.isComplex || probe.isBigNumber || probe.isFraction))))
+    throw new FormulaError('計算結果が1つの数値になりません。', {expr: rhs, detail: '結果の型: ' + M.typeOf(probe)});
+
+  const scope = {x: 0, y: 0, theta: 0};
+  const ev = () => { try { return toNum(code.evaluate(scope)); } catch { return NaN; } };
+  let f;
+  if (mode === 'fn') f = x => { scope.x = x; return ev(); };
+  else if (mode === 'surface') f = (x, y) => { scope.x = x; scope.y = y; return ev(); };
+  else f = t => { scope.theta = t; return ev(); };
+
+  let ok = 0;
+  for (let i = 0; i <= 40 && !ok; i++){
+    for (let j = 0; j <= (mode === 'surface' ? 40 : 0); j++){
+      const a = -10 + 20 * i / 40, b = -10 + 20 * j / 40;
+      const v = mode === 'surface' ? f(a / 2, b / 2) : mode === 'polar' ? f(Math.PI * 2 * i / 40) : f(a);
+      if (Number.isFinite(v)){ ok++; break; }
+    }
+  }
+  if (!ok) throw new FormulaError('表示範囲で実数の値になる点がありません。', {expr: rhs, hint: '平方根や対数の中が負になっていないか確認してください。'});
+
+  return {mode, f, rhs};
+}
+
+/* ---------- key pad ---------- */
+const KEYS = [
+  {l:'x', t:'x', c:'var'}, {l:'y', t:'y', c:'var'}, {l:'θ', t:'θ', c:'var'}, {l:'π', t:'π', c:'var'},
+  {l:'e', t:'e', c:'var', a:'ネイピア数 e'}, {l:'^', t:'^', c:'op', a:'累乗'}, {l:'x²', t:'^2', c:'op', a:'2乗'}, {l:'x³', t:'^3', c:'op', a:'3乗'},
+  {l:'+', t:'+', c:'op'}, {l:'−', t:'-', c:'op'}, {l:'×', t:'*', c:'op'}, {l:'÷', t:'/', c:'op'},
+  {l:'(', t:'(', c:'op'}, {l:')', t:')', c:'op'},
+  {l:'sin', f:'sin'}, {l:'asin', f:'asin'}, {l:'cos', f:'cos'}, {l:'acos', f:'acos'},
+  {l:'tan', f:'tan'}, {l:'atan', f:'atan'}, {l:'sinh', f:'sinh'}, {l:'cosh', f:'cosh'},
+  {l:'tanh', f:'tanh'}, {l:'√', f:'sqrt', a:'平方根'}, {l:'abs', f:'abs', a:'絶対値'}, {l:'exp', f:'exp'},
+  {l:'ln', f:'ln', a:'自然対数'}, {l:'log₁₀', f:'log10', a:'常用対数'},
+  {l:'⌫', cmd:'bs', c:'cmd', a:'1文字削除'}, {l:'AC', cmd:'clear', c:'cmd', a:'すべて消去'},
+  {l:'y =', lhs:'y', c:'lhs', a:'y = を付ける(平面)'}, {l:'z =', lhs:'z', c:'lhs', a:'z = を付ける(立体)'}, {l:'r =', lhs:'r', c:'lhs', a:'r = を付ける(極座標)'}
+];
+let caret = {s: null, e: null};
+const syncCaret = () => { caret = {s: input.selectionStart, e: input.selectionEnd}; };
+['input', 'keyup', 'click', 'select', 'focus'].forEach(ev => input.addEventListener(ev, () => setTimeout(syncCaret, 0)));
+
+function setCaret(p){
+  caret = {s: p, e: p};
+  if (fine){ input.focus(); input.setSelectionRange(p, p); }
+}
+function insert(before, after = ''){
+  const v = input.value;
+  let s = caret.s ?? v.length, e = caret.e ?? v.length;
+  s = Math.min(s, v.length); e = Math.min(e, v.length);
+  const sel = v.slice(s, e);
+  input.value = v.slice(0, s) + before + sel + after + v.slice(e);
+  setCaret(s + before.length + sel.length + (sel ? after.length : 0));
+}
+function backspace(){
+  const v = input.value;
+  let s = caret.s ?? v.length, e = caret.e ?? v.length;
+  if (s !== e){ input.value = v.slice(0, s) + v.slice(e); return setCaret(s); }
+  if (s === 0) return;
+  const m = v.slice(0, s).match(/(asin|acos|atan|sinh|cosh|tanh|sin|cos|tan|sqrt|abs|exp|ln|log10)\($/);
+  let from = m ? s - m[0].length : s - 1, to = s;
+  if (m && v[s] === ')') to = s + 1;
+  input.value = v.slice(0, from) + v.slice(to);
+  setCaret(from);
+}
+function setLhs(l){
+  const body = input.value.includes('=') ? input.value.slice(input.value.indexOf('=') + 1).trim() : input.value.trim();
+  input.value = `${l} = ${body}`;
+  setCaret(input.value.length);
+}
+for (const k of KEYS){
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'key ' + (k.c || 'fn'); b.textContent = k.l;
+  if (k.a) { b.setAttribute('aria-label', k.a); b.title = k.a; }
+  b.addEventListener('mousedown', ev => ev.preventDefault());
+  b.addEventListener('click', () => {
+    if (k.f) insert(k.f + '(', ')');
+    else if (k.cmd === 'bs') backspace();
+    else if (k.cmd === 'clear'){ input.value = ''; setCaret(0); }
+    else if (k.lhs) setLhs(k.lhs);
+    else insert(k.t);
+  });
+  keysEl.appendChild(b);
+}
+
+const EXAMPLES = ['y = x*sin(x)', 'y = tan(x)', 'z = sin(√(x²+y²))', 'z = x² − y²', 'r = 1 + cos(θ)', 'r = sin(4θ)', 'z = exp(-(x²+y²)/4)*cos(2x)'];
+const exWrap = $('examples');
+for (const ex of EXAMPLES){
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'ex'; b.textContent = ex;
+  b.addEventListener('click', () => { input.value = ex; caret = {s: ex.length, e: ex.length}; show(); });
+  exWrap.appendChild(b);
+}
+
+/* ---------- error dialog ---------- */
+const dlg = $('errDlg');
+function openError(err){
+  $('errMsg').textContent = err.message;
+  const box = $('errExpr'); box.textContent = '';
+  if (err.expr){
+    box.hidden = false;
+    box.appendChild(document.createTextNode(err.expr));
+    if (err.pos != null && err.pos >= 0){
+      const m = document.createElement('span'); m.className = 'mark';
+      m.textContent = '\n' + ' '.repeat(Math.min(err.pos, err.expr.length)) + '^';
+      box.appendChild(m);
+    }
+  } else box.hidden = true;
+  $('errHint').textContent = err.hint; $('errHint').hidden = !err.hint;
+  $('errDetail').textContent = err.detail; $('errDetail').hidden = !err.detail;
+  if (typeof dlg.showModal === 'function'){ if (!dlg.open) dlg.showModal(); }
+  else dlg.setAttribute('open', '');
+}
+dlg.addEventListener('close', () => { if (fine) { input.focus(); } });
+$('errClose').addEventListener('click', () => { if (typeof dlg.showModal !== 'function') dlg.removeAttribute('open'); });
+
+/* ---------- 2D renderer ---------- */
+const P2 = {ctx: canvas.getContext('2d'), W: 0, H: 0, dpr: 1, v: {cx: 0, cy: 0, sx: 40, sy: 40}, home: null, kind: null, f: null, trace: null, needFit: false, raf: 0};
+const toX = x => P2.W / 2 + (x - P2.v.cx) * P2.v.sx;
+const toY = y => P2.H / 2 - (y - P2.v.cy) * P2.v.sy;
+const fromX = px => P2.v.cx + (px - P2.W / 2) / P2.v.sx;
+const fromY = py => P2.v.cy - (py - P2.H / 2) / P2.v.sy;
+
+function resize2D(){
+  const r = canvas.getBoundingClientRect();
+  if (!r.width) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  P2.W = r.width; P2.H = r.height; P2.dpr = dpr;
+  canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+  if (P2.needFit) fit2D();
+  draw2D();
+}
+function quant(a, q){ return a[Math.min(a.length - 1, Math.max(0, Math.floor(q * (a.length - 1))))]; }
+function fit2D(){
+  const {W, H} = P2; if (!W || !P2.f){ P2.needFit = true; return; }
+  P2.needFit = false;
+  if (P2.kind === 'fn'){
+    const sx = W / 20, vals = [];
+    for (let i = 0; i <= 600; i++){ const y = P2.f(-10 + 20 * i / 600); if (Number.isFinite(y)) vals.push(y); }
+    vals.sort((a, b) => a - b);
+    let lo = vals.length ? quant(vals, .05) : -1, hi = vals.length ? quant(vals, .95) : 1;
+    if (hi - lo < 1e-9){ lo -= 1; hi += 1; }
+    const half = H / 2 / sx;
+    if (lo >= -half * .9 && hi <= half * .9) P2.v = {cx: 0, cy: 0, sx, sy: sx};
+    else P2.v = {cx: 0, cy: (lo + hi) / 2, sx, sy: H / ((hi - lo) * 1.3)};
+  } else {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i <= 1200; i++){
+      const t = Math.PI * 2 * i / 1200, r = P2.f(t);
+      if (!Number.isFinite(r)) continue;
+      const x = r * Math.cos(t), y = r * Math.sin(t);
+      if (Math.abs(x) > 1e4 || Math.abs(y) > 1e4) continue;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    if (!Number.isFinite(x0)){ x0 = y0 = -1; x1 = y1 = 1; }
+    const bw = Math.max(x1 - x0, 1e-3), bh = Math.max(y1 - y0, 1e-3);
+    const s = Math.min(W / (bw * 1.35), H / (bh * 1.35));
+    P2.v = {cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, sx: s, sy: s};
+  }
+  P2.home = {...P2.v};
+}
+function schedule2D(){ if (!P2.raf) P2.raf = requestAnimationFrame(() => { P2.raf = 0; draw2D(); }); }
+function nice(raw){
+  const p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+  const n = m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10;
+  return {step: n * p, minor: n === 2 ? n * p / 4 : n * p / 5};
+}
+function fmtTick(v, step){
+  const a = Math.abs(v);
+  let s = (a >= 1e6 || (a < 1e-4 && a > 0)) ? v.toExponential(1) : v.toFixed(Math.max(0, -Math.floor(Math.log10(step) + 1e-9)));
+  return s.replace('-', '−');
+}
+function fmtVal(v){ return String(Number(v.toPrecision(5))).replace('-', '−'); }
+
+function draw2D(){
+  const {ctx, W, H, dpr} = P2; if (!W) return;
+  const c = tok();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = c.surface; ctx.fillRect(0, 0, W, H);
+  if (!P2.f) return;
+  const gx = nice(90 / P2.v.sx), gy = nice(90 / P2.v.sy);
+  const isMajor = (v, st, mi) => Math.abs(Math.round(v / st) * st - v) < mi * 1e-3;
+
+  // grid
+  ctx.lineWidth = 1;
+  for (const pass of [0, 1]){
+    ctx.strokeStyle = pass ? c.gridMajor : c.grid;
+    ctx.beginPath();
+    for (let k = Math.ceil(fromX(0) / gx.minor); k <= Math.floor(fromX(W) / gx.minor); k++){
+      const v = k * gx.minor; if (isMajor(v, gx.step, gx.minor) !== !!pass) continue;
+      const px = Math.round(toX(v)) + .5; ctx.moveTo(px, 0); ctx.lineTo(px, H);
+    }
+    for (let k = Math.ceil(fromY(H) / gy.minor); k <= Math.floor(fromY(0) / gy.minor); k++){
+      const v = k * gy.minor; if (isMajor(v, gy.step, gy.minor) !== !!pass) continue;
+      const py = Math.round(toY(v)) + .5; ctx.moveTo(0, py); ctx.lineTo(W, py);
+    }
+    ctx.stroke();
+  }
+  // axes
+  const ax = toX(0), ay = toY(0);
+  ctx.strokeStyle = c.axis; ctx.lineWidth = 1.5; ctx.beginPath();
+  if (ax >= 0 && ax <= W){ ctx.moveTo(Math.round(ax) + .5, 0); ctx.lineTo(Math.round(ax) + .5, H); }
+  if (ay >= 0 && ay <= H){ ctx.moveTo(0, Math.round(ay) + .5); ctx.lineTo(W, Math.round(ay) + .5); }
+  ctx.stroke();
+  // labels
+  ctx.font = '500 11px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillStyle = c.muted;
+  const ly = Math.min(Math.max(ay + 5, 4), H - 16);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let k = Math.ceil(fromX(0) / gx.step); k <= Math.floor(fromX(W) / gx.step); k++){
+    const v = k * gx.step; if (Math.abs(v) < gx.step * 1e-6) continue;
+    const px = toX(v); if (px < 14 || px > W - 14) continue;
+    ctx.fillText(fmtTick(v, gx.step), px, ly);
+  }
+  const rightSide = ax > W - 60;
+  const lx = rightSide ? Math.min(ax - 6, W - 6) : Math.max(ax + 6, 6);
+  ctx.textAlign = rightSide ? 'right' : 'left'; ctx.textBaseline = 'middle';
+  for (let k = Math.ceil(fromY(H) / gy.step); k <= Math.floor(fromY(0) / gy.step); k++){
+    const v = k * gy.step; if (Math.abs(v) < gy.step * 1e-6) continue;
+    const py = toY(v); if (py < 12 || py > H - 12) continue;
+    ctx.fillText(fmtTick(v, gy.step), lx, py);
+  }
+  if (ax > 0 && ax < W && ay > 0 && ay < H){ ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('0', ax - 5, ay + 5); }
+  ctx.textBaseline = 'alphabetic';
+  if (ay > 0 && ay < H){ ctx.textAlign = 'right'; ctx.fillStyle = c.axis; ctx.font = 'italic 600 13px "JetBrains Mono", monospace'; ctx.fillText('x', W - 8, ay - 8); }
+  if (ax > 0 && ax < W){ ctx.textAlign = 'left'; ctx.fillStyle = c.axis; ctx.font = 'italic 600 13px "JetBrains Mono", monospace'; ctx.fillText('y', ax + 8, 48); }
+
+  // curve
+  ctx.strokeStyle = c.curve; ctx.lineWidth = 2.25; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath();
+  const f = P2.f, clampY = py => Math.max(-H * 4, Math.min(H * 5, py));
+  if (P2.kind === 'fn'){
+    const N = Math.ceil(W * 2); let pen = false, prevRaw = 0, prevX = 0;
+    for (let i = 0; i <= N; i++){
+      const px = i * W / N, x = fromX(px), y = f(x);
+      if (!Number.isFinite(y)){ pen = false; continue; }
+      const raw = toY(y);
+      if (pen && Math.abs(raw - prevRaw) > H * .75){
+        const pm = toY(f((x + prevX) / 2));
+        if (!Number.isFinite(pm) || pm < Math.min(raw, prevRaw) - 1 || pm > Math.max(raw, prevRaw) + 1) pen = false;
+      }
+      const py = clampY(raw);
+      if (!pen){ ctx.moveTo(px, py); pen = true; } else ctx.lineTo(px, py);
+      prevRaw = raw; prevX = x;
+    }
+  } else {
+    const N = 3000, lim = Math.max(W, H) * 1.5; let pen = false, ppx = 0, ppy = 0;
+    for (let i = 0; i <= N; i++){
+      const t = Math.PI * 2 * i / N, r = f(t);
+      if (!Number.isFinite(r)){ pen = false; continue; }
+      const px = Math.max(-W * 4, Math.min(W * 5, toX(r * Math.cos(t)))), py = clampY(toY(r * Math.sin(t)));
+      if (pen && Math.hypot(px - ppx, py - ppy) > lim) pen = false;
+      if (!pen){ ctx.moveTo(px, py); pen = true; } else ctx.lineTo(px, py);
+      ppx = px; ppy = py;
+    }
+  }
+  ctx.stroke();
+
+  // trace
+  if (P2.trace != null && P2.kind === 'fn'){
+    const x = P2.trace, y = f(x);
+    if (Number.isFinite(y)){
+      const px = toX(x), py = toY(y);
+      if (py > -10 && py < H + 10){
+        ctx.setLineDash([3, 4]); ctx.strokeStyle = c.axis; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = c.surface; ctx.strokeStyle = c.curve; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      const label = `x = ${fmtVal(x)}   y = ${fmtVal(y)}`;
+      ctx.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
+      const w = ctx.measureText(label).width + 18, bx = W - 10 - w, by = 10;
+      ctx.fillStyle = c.surface; ctx.strokeStyle = c.line; ctx.lineWidth = 1;
+      ctx.beginPath(); (ctx.roundRect ? ctx.roundRect(bx, by, w, 26, 7) : ctx.rect(bx, by, w, 26)); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = c.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(label, bx + 9, by + 13.5);
+    }
+  }
+}
+function zoom2D(k, px, py){
+  const wx = fromX(px), wy = fromY(py);
+  const sx = Math.min(1e9, Math.max(1e-7, P2.v.sx * k)), real = sx / P2.v.sx;
+  P2.v.sx = sx; P2.v.sy = Math.min(1e9, Math.max(1e-7, P2.v.sy * real));
+  P2.v.cx = wx - (px - P2.W / 2) / P2.v.sx;
+  P2.v.cy = wy + (py - P2.H / 2) / P2.v.sy;
+  schedule2D();
+}
+function pan2D(dx, dy){ P2.v.cx -= dx / P2.v.sx; P2.v.cy += dy / P2.v.sy; schedule2D(); }
+
+// pointer: drag = pan, two fingers = pinch, wheel = zoom, tap = trace
+const pts = new Map(); let pinch = null, down = null;
+const local = e => { const r = canvas.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  const p = local(e); pts.set(e.pointerId, p);
+  if (pts.size === 1){ down = {...p, moved: false}; }
+  if (pts.size === 2){
+    const [a, b] = [...pts.values()];
+    pinch = {d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2};
+    if (down) down.moved = true;
+  }
+});
+canvas.addEventListener('pointermove', e => {
+  const p = local(e);
+  if (!pts.has(e.pointerId)){
+    if (e.pointerType === 'mouse' && P2.kind === 'fn'){ P2.trace = fromX(p.x); schedule2D(); }
+    return;
+  }
+  const prev = pts.get(e.pointerId); pts.set(e.pointerId, p);
+  if (pts.size === 1){
+    pan2D(p.x - prev.x, p.y - prev.y);
+    if (down && Math.hypot(p.x - down.x, p.y - down.y) > 6) down.moved = true;
+    if (e.pointerType === 'mouse' && P2.kind === 'fn') P2.trace = fromX(p.x);
+  } else if (pts.size === 2 && pinch){
+    const [a, b] = [...pts.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (pinch.d > 0 && d > 0) zoom2D(d / pinch.d, mx, my);
+    pan2D(mx - pinch.mx, my - pinch.my);
+    pinch = {d, mx, my};
+  }
+});
+function endPointer(e){
+  if (!pts.has(e.pointerId)) return;
+  const p = local(e); pts.delete(e.pointerId);
+  if (pts.size < 2) pinch = null;
+  if (pts.size === 0){
+    if (down && !down.moved && e.pointerType !== 'mouse' && P2.kind === 'fn'){ P2.trace = fromX(p.x); schedule2D(); }
+    down = null;
+  }
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !pts.size){ P2.trace = null; schedule2D(); } });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const p = local(e), dy = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+  zoom2D(Math.exp(-dy * 0.0015), p.x, p.y);
+}, {passive: false});
+canvas.addEventListener('dblclick', () => { if (P2.home){ P2.v = {...P2.home}; schedule2D(); } });
+
+/* ---------- 3D renderer ---------- */
+let R3 = 5, has3D = false;
+const DEFAULT_CAM = {eye: {x: 1.55, y: -1.55, z: 1.05}, center: {x: 0, y: 0, z: 0}, up: {x: 0, y: 0, z: 1}};
+const curCam = () => (div3._fullLayout && div3._fullLayout.scene && div3._fullLayout.scene.camera) || null;
+
+function render3D(resetCam){
+  if (!window.Plotly){ openError(new FormulaError('3次元表示のライブラリを読み込めませんでした。', {hint: '通信環境を確認してページを再読み込みしてください。'})); return; }
+  const f = current.f, n = 70, xs = [], ys = [], z = [], fin = [];
+  for (let i = 0; i < n; i++){ xs.push(-R3 + 2 * R3 * i / (n - 1)); ys.push(-R3 + 2 * R3 * i / (n - 1)); }
+  for (let j = 0; j < n; j++){
+    const row = [];
+    for (let i = 0; i < n; i++){ const v = f(xs[i], ys[j]); if (Number.isFinite(v)){ row.push(v); fin.push(v); } else row.push(null); }
+    z.push(row);
+  }
+  fin.sort((a, b) => a - b);
+  let lo = fin.length ? fin[0] : -1, hi = fin.length ? fin[fin.length - 1] : 1;
+  if (fin.length > 20){
+    const q1 = quant(fin, .02), q2 = quant(fin, .98), span = (q2 - q1) || 1;
+    if (hi > q2 + span * 3) hi = q2 + span * .25;
+    if (lo < q1 - span * 3) lo = q1 - span * .25;
+    for (const row of z) for (let i = 0; i < n; i++) if (row[i] != null && (row[i] > hi || row[i] < lo)) row[i] = null;
+  }
+  if (hi - lo < 1e-9){ lo -= 1; hi += 1; }
+  const c = tok();
+  const axis = t => ({
+    title: {text: t, font: {family: 'JetBrains Mono, monospace', size: 13, color: c.ink}},
+    color: c.muted, gridcolor: c.gridMajor, zerolinecolor: c.axis, showbackground: true, backgroundcolor: c.surface,
+    linecolor: c.line, tickfont: {family: 'JetBrains Mono, monospace', size: 10, color: c.muted}
+  });
+  const cam = resetCam ? DEFAULT_CAM : (curCam() ? JSON.parse(JSON.stringify(curCam())) : DEFAULT_CAM);
+  const pad = (hi - lo) * .04;
+  const data = [{
+    type: 'surface', x: xs, y: ys, z, showscale: false, cmin: lo, cmax: hi,
+    colorscale: [[0, '#26357F'], [0.3, '#1C7A9C'], [0.6, '#5FBF8A'], [0.85, '#E6C85A'], [1, '#F08A4B']],
+    contours: {z: {show: true, usecolormap: true, highlightcolor: c.ink, project: {z: false}}},
+    lighting: {ambient: .7, diffuse: .55, specular: .12, roughness: .7},
+    hovertemplate: 'x = %{x:.3f}<br>y = %{y:.3f}<br>z = %{z:.4f}<extra></extra>'
+  }];
+  const layout = {
+    margin: {l: 0, r: 0, t: 0, b: 0}, paper_bgcolor: 'rgba(0,0,0,0)', font: {family: 'JetBrains Mono, monospace', color: c.ink},
+    hoverlabel: {bgcolor: c.surface, bordercolor: c.line, font: {family: 'JetBrains Mono, monospace', color: c.ink}},
+    scene: {xaxis: axis('x'), yaxis: axis('y'), zaxis: {...axis('z'), range: [lo - pad, hi + pad]},
+      aspectmode: 'manual', aspectratio: {x: 1, y: 1, z: .75}, camera: cam, dragmode: 'turntable'}
+  };
+  Plotly.react(div3, data, layout, {displayModeBar: false, responsive: true, scrollZoom: true});
+  has3D = true;
+}
+function zoom3D(k){
+  const cam = curCam(); if (!cam) return;
+  const e = cam.eye;
+  Plotly.relayout(div3, {'scene.camera': {...JSON.parse(JSON.stringify(cam)), eye: {x: e.x / k, y: e.y / k, z: e.z / k}}});
+}
+range3d.addEventListener('click', e => {
+  const b = e.target.closest('button[data-r]'); if (!b || !current) return;
+  R3 = +b.dataset.r;
+  range3d.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+  render3D(false);
+});
+
+/* ---------- controls ---------- */
+let current = null;
+const MODE_INFO = {
+  fn: ['2D', 'y = f(x)', 'ドラッグで移動 · ピンチ/ホイールで拡大縮小 · タップで座標'],
+  polar: ['極座標', 'r = f(θ), 0 ≤ θ ≤ 2π', 'ドラッグで移動 · ピンチ/ホイールで拡大縮小'],
+  surface: ['3D', 'z = f(x, y)', 'ドラッグで視点を回転 · ピンチ/ホイールで拡大縮小']
+};
+function show(){
+  let res;
+  try {
+    if (!M) throw new FormulaError('計算ライブラリを読み込めませんでした。', {hint: '通信環境を確認してページを再読み込みしてください。'});
+    res = analyze(input.value);
+  } catch (e){
+    openError(e instanceof FormulaError ? e : new FormulaError('数式を解釈できませんでした。', {detail: String(e && e.message || e)}));
+    return;
+  }
+  current = res;
+  const [m, sig, h] = MODE_INFO[res.mode];
+  badge.innerHTML = ''; const b = document.createElement('b'); b.textContent = m; const s = document.createElement('span'); s.textContent = sig; badge.append(b, s);
+  hintEl.textContent = h;
+  if (res.mode === 'surface'){
+    canvas.hidden = true; div3.hidden = false; range3d.hidden = false;
+    render3D(true);
+  } else {
+    if (has3D && window.Plotly){ Plotly.purge(div3); has3D = false; }
+    div3.hidden = true; range3d.hidden = true; canvas.hidden = false;
+    P2.kind = res.mode; P2.f = res.f; P2.trace = null;
+    resize2D(); fit2D(); draw2D();
+  }
+}
+form.addEventListener('submit', e => { e.preventDefault(); if (!fine) input.blur(); show(); });
+$('zoomIn').addEventListener('click', () => { if (!current) return; current.mode === 'surface' ? zoom3D(1.25) : zoom2D(1.4, P2.W / 2, P2.H / 2); });
+$('zoomOut').addEventListener('click', () => { if (!current) return; current.mode === 'surface' ? zoom3D(0.8) : zoom2D(1 / 1.4, P2.W / 2, P2.H / 2); });
+$('zoomReset').addEventListener('click', () => {
+  if (!current) return;
+  if (current.mode === 'surface') Plotly.relayout(div3, {'scene.camera': DEFAULT_CAM});
+  else if (P2.home){ P2.v = {...P2.home}; P2.trace = null; schedule2D(); }
+});
+
+new ResizeObserver(() => { if (current && current.mode !== 'surface') resize2D(); else if (has3D && window.Plotly) Plotly.Plots.resize(div3); }).observe(stage);
+const retheme = () => { if (!current) return; if (current.mode === 'surface') render3D(false); else schedule2D(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme);
+new MutationObserver(retheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (current && current.mode !== 'surface') schedule2D(); });
+
+input.value = 'y = x*sin(x)';
+caret = {s: input.value.length, e: input.value.length};
+requestAnimationFrame(show);
+})();
+</script>
+</body>
+</html>
